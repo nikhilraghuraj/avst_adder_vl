@@ -129,6 +129,7 @@ class avst_driver: uvm_driver!(avst_item)
     super(name, parent);
     uvm_config_db!AvstIntf.get(this, "", "avst_in", avst_in);
     uvm_config_db!AvstIntf.get(this, "", "avst_out", avst_out);
+    assert (avst_in !is null && avst_out !is null);
   }
 
 
@@ -166,6 +167,7 @@ class avst_driver: uvm_driver!(avst_item)
 	seq_item_port.item_done();
       }
       else if (avst_out.valid) {
+	wait (avst_in.clock.negedge());
 	avst_out.ready = true;
 	wait (avst_out.clock.negedge());
 	avst_out.ready = false;
@@ -178,50 +180,11 @@ class avst_driver: uvm_driver!(avst_item)
 
 }
 
-class avst_req_snooper: uvm_monitor
+class avst_snooper: uvm_monitor
 {
   mixin uvm_component_utils;
 
   AvstIntf avst;
-
-  this (string name, uvm_component parent = null) {
-    super(name,parent);
-    uvm_config_db!AvstIntf.get(this, "", "avst", avst);
-    assert (avst !is null);
-  }
-
-  @UVM_BUILD {
-    uvm_analysis_port!avst_item egress;
-  }
-  
-  override void run_phase(uvm_phase phase) {
-    super.run_phase(phase);
-
-    while (true) {
-      wait (avst.clock.negedge());
-      wait (5.nsec);
-      if (avst.reset == 1 ||
-	  avst.ready == 0 || avst.valid == 0)
-	continue;
-      else {
-	avst_item item = avst_item.type_id.create(get_full_name() ~ ".avst_item");
-	item.data = avst.data;
-	item.end = cast(bool) avst.end;
-	egress.write(item);
-	// uvm_info("AVL Monitored Req", item.sprint(), UVM_DEBUG);
-	// writeln("valid input");
-      }
-    }
-  }
-
-}
-
-class avst_rsp_snooper: uvm_monitor
-{
-  mixin uvm_component_utils;
-
-  AvstIntf avst;
-
 
   this (string name, uvm_component parent = null) {
     super(name,parent);
@@ -238,7 +201,6 @@ class avst_rsp_snooper: uvm_monitor
 
     while (true) {
       wait (avst.clock.posedge());
-      wait (5.nsec);
       if (avst.reset == 1 ||
 	  avst.ready == 0 || avst.valid == 0)
 	continue;
@@ -247,15 +209,13 @@ class avst_rsp_snooper: uvm_monitor
 	item.data = avst.data;
 	item.end = cast(bool) avst.end;
 	egress.write(item);
-	// uvm_info("AVL Monitored Req", item.sprint(), UVM_DEBUG);
+	uvm_info("AVL Monitored Req", item.sprint(), UVM_DEBUG);
 	// writeln("valid input");
       }
     }
   }
-  
 
 }
-
 
 
 class avst_scoreboard: uvm_scoreboard
@@ -286,36 +246,37 @@ class avst_scoreboard: uvm_scoreboard
   }
 
   void write_req(avst_phrase_seq seq) {
-    synchronized(this) {
       uvm_info("Monitor", "Got req item", UVM_DEBUG);
       req_queue ~= seq;
       assert(phase_run !is null);
       phase_run.raise_objection(this);
       // writeln("Received request: ", matched + 1);
-    }
   }
 
   void write_rsp(avst_phrase_seq seq) {
-    synchronized(this) {
       uvm_info("Monitor", "Got rsp item", UVM_DEBUG);
       // seq.print();
       rsp_queue ~= seq;
-      auto expected = req_queue[matched].transform();
-      ++matched;
-      // writeln("Ecpected: ", expected[0..64]);
-      if (expected == seq.phrase) {
-	uvm_info("MATCHED",
-		 format("Scoreboard received expected response #%d", matched),
-		 UVM_LOW);
-	uvm_info("REQUEST", format("%s", req_queue[$-1].phrase), UVM_LOW);
-	uvm_info("RESPONSE", format("%s", rsp_queue[$-1].phrase), UVM_LOW);
-      }
-      else {
-	uvm_error("MISMATCHED", "Scoreboard received unmatched response");
-	writeln(expected, " != ", seq.phrase);
-      }
+      assert(phase_run !is null);
+      check_matched();
       phase_run.drop_objection(this);
+  }
+
+  void check_matched() {
+    auto expected = req_queue[matched].transform();
+    // writeln("Ecpected: ", expected[0..64]);
+    if (expected == rsp_queue[matched].phrase) {
+      uvm_info("MATCHED",
+	       format("Scoreboard received expected response #%d", matched),
+	       UVM_LOW);
+      uvm_info("REQUEST", format("%s", req_queue[$-1].phrase), UVM_LOW);
+      uvm_info("RESPONSE", format("%s", rsp_queue[$-1].phrase), UVM_LOW);
     }
+    else {
+      uvm_error("MISMATCHED", "Scoreboard received unmatched response");
+      writeln(expected, " != ", rsp_queue[matched].phrase);
+    }
+    matched += 1;
   }
 
 }
@@ -371,8 +332,8 @@ class avst_agent: uvm_agent
     avst_monitor   req_monitor;
     avst_monitor   rsp_monitor;
 
-    avst_req_snooper   req_snooper;
-    avst_rsp_snooper   rsp_snooper;
+    avst_snooper   req_snooper;
+    avst_snooper   rsp_snooper;
 
     avst_scoreboard   scoreboard;
   }
@@ -405,8 +366,8 @@ class random_test: uvm_test
   }
   
   override void run_phase(uvm_phase phase) {
+    phase.get_objection().set_drain_time(this, 100.nsec);
     phase.raise_objection(this);
-    phase.get_objection.set_drain_time(this, 20.nsec);
     auto rand_sequence = new avst_seq("avst_seq");
 
     for (size_t i=0; i!=100; ++i) {
@@ -540,12 +501,13 @@ class Top: Entity
       wait (10.nsec);
       clock = true;
       dut.clk = true;
+      wait (2.nsec);
       dut.eval();
       if (_trace !is null) {
 	_trace.dump(getSimTime().getVal());
 	_trace.flush();
       }
-      wait (10.nsec);
+      wait (8.nsec);
     }
   }
 
