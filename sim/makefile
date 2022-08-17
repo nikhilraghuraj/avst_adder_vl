@@ -28,6 +28,7 @@ euvm_dir/Vadder_avst_euvm.d euvm_dir/Vadder_avst_euvm_funcs.o euvm_dir/verilated
 
 avst_adder: euvm_dir/Vadder_avst_euvm.d ../testbench/adder_avst.d \
 	   $(LDC2BINDIR)/../import/esdl/intf/verilator/verilated.d \
+	   $(LDC2BINDIR)/../import/esdl/intf/verilator/trace.d \
 	   euvm_dir/Vadder_avst_euvm_funcs.o euvm_dir/verilated_vcd_d.o \
 	   obj_dir/Vadder_avst__ALL.a \
 	   obj_dir/verilated.o  obj_dir/verilated_vcd_c.o

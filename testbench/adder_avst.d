@@ -1,5 +1,6 @@
 import esdl;
 import esdl.intf.verilator.verilated;
+import esdl.intf.verilator.trace;
 import uvm;
 import std.stdio;
 import std.string: format;
