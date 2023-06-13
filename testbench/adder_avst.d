@@ -11,12 +11,17 @@ class avst_item: uvm_sequence_item
 
   @UVM_DEFAULT {
     @rand ubyte data;
+    @rand ubyte delay;
     bool end;
   }
    
   this(string name = "avst_item") {
     super(name);
   }
+
+  constraint! q{
+    delay dist [0 := 99, 1:9 :/ 1];
+  } cst_delay;
 
   constraint! q{
     data >= 0x30;
@@ -98,8 +103,8 @@ class avst_seq: uvm_sequence!avst_item
   }
 
   constraint!q{
-    seq_size == 4;
-    // seq_size > 16;
+    seq_size < 64;
+    seq_size > 16;
   } seq_size_cst;
 
   // task
@@ -124,40 +129,91 @@ class avst_driver: uvm_driver!(avst_item)
   mixin uvm_component_utils;
   
   AvstIntf avst_in;
-  AvstIntf avst_out;
 
   this(string name, uvm_component parent = null) {
     super(name, parent);
     uvm_config_db!AvstIntf.get(this, "", "avst_in", avst_in);
-    uvm_config_db!AvstIntf.get(this, "", "avst_out", avst_out);
-    assert (avst_in !is null && avst_out !is null);
+    assert (avst_in !is null);
   }
 
 
   override void run_phase(uvm_phase phase) {
     super.run_phase(phase);
-    avst_out.ready = true;
     while (true) {
       // uvm_info("AVL TRANSACTION", req.sprint(), UVM_DEBUG);
-      // drive_vpi_port.put(req);
-      if (avst_in.ready == 0 || avst_in.reset == 1) {
+      seq_item_port.try_next_item(req);
+
+      if (req !is null) {
+
+	for (int i = 0; i != req.delay; ++i) {
+	  wait (avst_in.clock.negedge());
+
+	  avst_in.end = false;
+	  avst_in.valid = false;
+	}
+	
+	while (avst_in.ready == 0 || avst_in.reset == 1) {
+	  wait (avst_in.clock.negedge());
+
+	  avst_in.end = false;
+	  avst_in.valid = false;
+	}
+	  
+
 	wait (avst_in.clock.negedge());
-	continue;
+
+	avst_in.data = req.data;
+	avst_in.end = req.end;
+	avst_in.valid = true;
+
+	// req_analysis.write(req);
+	seq_item_port.item_done();
       }
-      seq_item_port.get_next_item(req);
-      wait (avst_in.clock.negedge());
+      else {
+	wait (avst_in.clock.negedge());
 
-      avst_in.data = req.data;
-      avst_in.end = req.end;
-      avst_in.valid = true;
+	avst_in.end = false;
+	avst_in.valid = false;
+      }
+    }
+  }
 
-      wait (avst_in.clock.negedge());
+  // protected void trans_received(avst_item tr) {}
+  // protected void trans_executed(avst_item tr) {}
 
-      avst_in.end = false;
-      avst_in.valid = false;
+}
 
-      // req_analysis.write(req);
-      seq_item_port.item_done();
+class avst_out_driver: uvm_component
+{
+
+  mixin uvm_component_utils;
+  
+  AvstIntf avst_out;
+
+  this(string name, uvm_component parent = null) {
+    super(name, parent);
+    uvm_config_db!AvstIntf.get(this, "", "avst_out", avst_out);
+    assert (avst_out !is null);
+  }
+
+
+  override void run_phase(uvm_phase phase) {
+    super.run_phase(phase);
+    while (true) {
+      uint delay;
+      uint flag;
+      delay = urandom(0, 10);
+      flag = urandom(0, 10);
+      if (flag == 0) {
+	for (size_t i=0; i!=delay; ++i) {
+	  avst_out.ready = false;
+	  wait (avst_out.clock.negedge());
+	}
+      }
+      else {
+	avst_out.ready = true;
+	wait (avst_out.clock.negedge());
+      }
     }
   }
 
@@ -314,6 +370,7 @@ class avst_agent: uvm_agent
   @UVM_BUILD {
     avst_sequencer sequencer;
     avst_driver    driver;
+    avst_out_driver driver_out;
 
     avst_monitor   req_monitor;
     avst_monitor   rsp_monitor;
@@ -483,10 +540,11 @@ class Top: Entity
       // writeln("clock is: ", clock);
       clock = false;
       dut.clk = false;
+      wait (2.nsec);
       dut.eval();
       if (_trace !is null)
 	_trace.dump(getSimTime().getVal());
-      wait (10.nsec);
+      wait (8.nsec);
       clock = true;
       dut.clk = true;
       wait (2.nsec);
@@ -527,7 +585,7 @@ void main(string[] args) {
 
   tb.exec_in_uvm_context({
       uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.driver", "avst_in", tb.top.avstIn);
-      uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.driver", "avst_out", tb.top.avstOut);
+      uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.driver_out", "avst_out", tb.top.avstOut);
       uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.req_snooper", "avst", tb.top.avstIn);
       uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.rsp_snooper", "avst", tb.top.avstOut);
     });
