@@ -98,8 +98,8 @@ class avst_seq: uvm_sequence!avst_item
   }
 
   constraint!q{
-    seq_size < 64;
-    seq_size > 16;
+    seq_size == 4;
+    // seq_size > 16;
   } seq_size_cst;
 
   // task
@@ -136,43 +136,28 @@ class avst_driver: uvm_driver!(avst_item)
 
   override void run_phase(uvm_phase phase) {
     super.run_phase(phase);
+    avst_out.ready = true;
     while (true) {
       // uvm_info("AVL TRANSACTION", req.sprint(), UVM_DEBUG);
       // drive_vpi_port.put(req);
-      if (avst_in.reset == 1) {
+      if (avst_in.ready == 0 || avst_in.reset == 1) {
 	wait (avst_in.clock.negedge());
 	continue;
       }
+      seq_item_port.get_next_item(req);
+      wait (avst_in.clock.negedge());
 
-      if (avst_in.ready == 0 && avst_out.valid == 0) {
-	wait (avst_in.clock.negedge());
-	continue;
-      }
+      avst_in.data = req.data;
+      avst_in.end = req.end;
+      avst_in.valid = true;
 
-      if (avst_in.ready) {
-	seq_item_port.get_next_item(req);
+      wait (avst_in.clock.negedge());
 
+      avst_in.end = false;
+      avst_in.valid = false;
 
-	wait (avst_in.clock.negedge());
-
-	avst_in.data = req.data;
-	avst_in.end = req.end;
-	avst_in.valid = true;
-
-	wait (avst_in.clock.negedge());
-
-	avst_in.end = false;
-	avst_in.valid = false;
-
-	// req_analysis.write(req);
-	seq_item_port.item_done();
-      }
-      else if (avst_out.valid) {
-	wait (avst_in.clock.negedge());
-	avst_out.ready = true;
-	wait (avst_out.clock.negedge());
-	avst_out.ready = false;
-      }
+      // req_analysis.write(req);
+      seq_item_port.item_done();
     }
   }
 
@@ -380,25 +365,25 @@ class random_test: uvm_test
   }
 }
 
-class QuickFoxTest: uvm_test
-{
-  mixin uvm_component_utils;
+// class QuickFoxTest: uvm_test
+// {
+//   mixin uvm_component_utils;
 
-  this(string name, uvm_component parent) {
-    super(name, parent);
-  }
+//   this(string name, uvm_component parent) {
+//     super(name, parent);
+//   }
 
-  @UVM_BUILD avst_env env;
+//   @UVM_BUILD avst_env env;
   
-  override void run_phase(uvm_phase phase) {
-    phase.raise_objection(this);
-    auto sequence = new avst_phrase_seq("QuickFoxSeq");
-    sequence.set_phrase("The quick brown fox jumps over the lazy dog");
+//   override void run_phase(uvm_phase phase) {
+//     phase.raise_objection(this);
+//     auto sequence = new avst_phrase_seq("QuickFoxSeq");
+//     sequence.set_phrase("The quick brown fox jumps over the lazy dog");
 
-    sequence.start(env.agent.sequencer, null);
-    phase.drop_objection(this);
-  }
-}
+//     sequence.start(env.agent.sequencer, null);
+//     phase.drop_objection(this);
+//   }
+// }
 
 class avst_env: uvm_env
 {
