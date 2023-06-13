@@ -18,20 +18,21 @@ run: avst_adder
 
 verilator.stamp: ../rtl/adder_avst.v
 	touch verilator.stamp
-	verilator --trace --cc --euvm $^
+	verilator --threads 1 --trace --cc --euvm $^
 	(cd euvm_dir; g++ -c -I ../obj_dir/ -I $(VLBINDIR)/../share/verilator/include Vadder_avst_euvm_funcs.cpp)
 	(cd euvm_dir; g++ -c -I ../obj_dir/ -I $(VLBINDIR)/../share/verilator/include $(LDC2BINDIR)/../import/esdl/intf/verilator/cpp/verilated_vcd_d.cpp -o verilated_vcd_d.o)
-	(cd obj_dir; make OPT=" -ggdb " -f Vadder_avst.mk Vadder_avst__ALL.a verilated.o verilated_vcd_c.o)
+	(cd obj_dir; make OPT=" -ggdb " -f Vadder_avst.mk Vadder_avst__ALL.a verilated.o verilated_vcd_c.o verilated_threads.o)
 
 euvm_dir/Vadder_avst_euvm.d euvm_dir/Vadder_avst_euvm_funcs.o euvm_dir/verilated_vcd_d.o obj_dir/Vadder_avst__ALL.a obj_dir/verilated.o: verilator.stamp
 
 
-avst_adder: euvm_dir/Vadder_avst_euvm.d ../testbench/adder_avst.d \
+avst_adder: ../testbench/adder_avst.d euvm_dir/Vadder_avst_euvm.d  \
 	   $(LDC2BINDIR)/../import/esdl/intf/verilator/verilated.d \
 	   $(LDC2BINDIR)/../import/esdl/intf/verilator/trace.d \
 	   euvm_dir/Vadder_avst_euvm_funcs.o euvm_dir/verilated_vcd_d.o \
+	   euvm_dir/Vadder_avst_euvm_funcs.o \
 	   obj_dir/Vadder_avst__ALL.a \
-	   obj_dir/verilated.o  obj_dir/verilated_vcd_c.o
-	ldc2 -g $(DFLAGS) -Ieuvm_dir -link-defaultlib-shared -of$@ -L-luvm-ldc-shared -L-lesdl-ldc-shared \
+	   obj_dir/verilated.o  obj_dir/verilated_threads.o obj_dir/verilated_vcd_c.o
+	ldc2 $(DFLAGS) -Ieuvm_dir -link-defaultlib-shared -of$@ -L-luvm-ldc-shared -L-lesdl-ldc-shared \
 		-L-lphobos2-ldc-shared -L-lz3 -L-ldl $^ -L-lstdc++
 

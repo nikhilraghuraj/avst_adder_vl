@@ -492,7 +492,9 @@ class Top: Entity
   void stimulateClock() {
     import std.stdio;
     clock = false;
-    while (true) {
+    for (size_t i=0; i!=10000; ++i)
+      {
+	
       // writeln("clock is: ", clock);
       clock = false;
       dut.clk = false;
