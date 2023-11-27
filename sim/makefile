@@ -1,5 +1,6 @@
 CC              = gcc
 CFLAGS		= -Wall -O3 -fPIC
+SEED            = 1
 
 DFLAGS = -relocation-model=pic -w
 
@@ -15,7 +16,7 @@ clean:
 	rm -rf avst_adder* euvm_dir obj_dir verilator.stamp
 
 run: avst_adder
-	./avst_adder +UVM_TESTNAME=adder_avst.random_test +UVM_VERBOSITY=$(VERBOSITY) # +UVM_OBJECTION_TRACE
+	./avst_adder +UVM_TESTNAME=adder_avst.random_test +UVM_VERBOSITY=$(VERBOSITY) +random_seed=$(SEED) # +UVM_OBJECTION_TRACE
 
 verilator.stamp: ../rtl/adder_avst.v
 	touch verilator.stamp

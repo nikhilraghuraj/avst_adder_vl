@@ -12,7 +12,7 @@ class avst_item: uvm_sequence_item
   @UVM_DEFAULT {
     @rand ubyte data;
     @rand ubyte delay;
-    bool end;
+    ubvec!1 end;
   }
    
   this(string name = "avst_item") {
@@ -228,6 +228,15 @@ class avst_snooper: uvm_monitor
 
   AvstIntf avst;
 
+  int _ready_latency = 0;
+
+  void set_read_latency(int latency) {
+    assert (latency == 0 || latency == 1);
+    _ready_latency = latency;
+  }
+
+  bool prev_ready;
+
   this (string name, uvm_component parent = null) {
     super(name,parent);
     uvm_config_db!AvstIntf.get(this, "", "avst", avst);
@@ -243,9 +252,12 @@ class avst_snooper: uvm_monitor
 
     while (true) {
       wait (avst.clock.posedge());
+      if (_ready_latency == 0) prev_ready = avst.ready;
       if (avst.reset == 1 ||
-	  avst.ready == 0 || avst.valid == 0)
+	  prev_ready == 0 || avst.valid == 0) {
+	if (_ready_latency == 1) prev_ready = avst.ready;
 	continue;
+      }
       else {
 	avst_item item = avst_item.type_id.create(get_full_name() ~ ".avst_item");
 	item.data = avst.data;
@@ -254,6 +266,7 @@ class avst_snooper: uvm_monitor
 	uvm_info("AVL Monitored Req", item.sprint(), UVM_DEBUG);
 	// writeln("valid input");
       }
+      if (_ready_latency == 1) prev_ready = avst.ready;
     }
   }
 
@@ -393,6 +406,10 @@ class avst_agent: uvm_agent
     req_monitor.egress.connect(scoreboard.req_analysis);
     rsp_snooper.egress.connect(rsp_monitor.ingress);
     rsp_monitor.egress.connect(scoreboard.rsp_analysis);
+  }
+
+  override void end_of_elaboration_phase(uvm_phase phase) {
+    rsp_snooper.set_read_latency(1);
   }
 }
 
@@ -534,7 +551,7 @@ class Top: Entity
   void stimulateClock() {
     import std.stdio;
     clock = false;
-    for (size_t i=0; i!=10000; ++i)
+    for (size_t i=0; i!=1000000; ++i)
       {
 	
       // writeln("clock is: ", clock);
@@ -570,26 +587,28 @@ class Top: Entity
 class uvm_sha3_tb: uvm_tb
 {
   Top top;
+  override void initial() {
+    uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.driver", "avst_in", top.avstIn);
+    uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.driver_out", "avst_out", top.avstOut);
+    uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.req_snooper", "avst", top.avstIn);
+    uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.rsp_snooper", "avst", top.avstOut);
+  }
 }
 
 void main(string[] args) {
   import std.stdio;
+  uint random_seed;
+
+  CommandLine cmdl = new CommandLine(args);
+
+  if (cmdl.plusArgs("random_seed=" ~ "%d", random_seed))
+    writeln("Using random_seed: ", random_seed);
+  else random_seed = 1;
 
   auto tb = new uvm_sha3_tb;
   tb.multicore(0, 1);
   tb.elaborate("tb", args);
-  tb.set_seed(1);
-  // tb.setAsyncMode();
-
-  tb.initialize();
-
-  tb.exec_in_uvm_context({
-      uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.driver", "avst_in", tb.top.avstIn);
-      uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.driver_out", "avst_out", tb.top.avstOut);
-      uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.req_snooper", "avst", tb.top.avstIn);
-      uvm_config_db!(AvstIntf).set(null, "uvm_test_top.env.agent.rsp_snooper", "avst", tb.top.avstOut);
-    });
-			   
+  tb.set_seed(random_seed);
   tb.start();
   
 }
