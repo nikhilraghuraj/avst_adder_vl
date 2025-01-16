@@ -20,12 +20,13 @@ class avst_item: uvm_sequence_item
   }
 
   constraint! q{
-    delay dist [0 := 99, 1:9 :/ 1];
+    delay >= 0x00;
+    delay <= 0xff;
   } cst_delay;
 
   constraint! q{
-    data >= 0x30;
-    data <= 0x7a;
+    data >= 0x00;
+    data <= 0xff;
   } cst_ascii;
 
 }
@@ -81,6 +82,7 @@ class avst_phrase_seq: uvm_sequence!avst_item
     foreach (c; phrase) {
       value += c;
     }
+    uvm_info("sum: ", format("%d", value), UVM_HIGH); //print statement for testing
     for (int i=4; i!=0; --i) {
       retval ~= cast (ubyte) (value >> (i-1)*8);
     }
@@ -130,6 +132,9 @@ class avst_driver: uvm_driver!(avst_item)
   
   AvstIntf avst_in;
 
+  @UVM_BUILD
+    uvm_analysis_port!avst_item to_snooper;
+
   this(string name, uvm_component parent = null) {
     super(name, parent);
     uvm_config_db!AvstIntf.get(this, "", "avst_in", avst_in);
@@ -141,10 +146,11 @@ class avst_driver: uvm_driver!(avst_item)
     super.run_phase(phase);
     while (true) {
       // uvm_info("AVL TRANSACTION", req.sprint(), UVM_DEBUG);
-      seq_item_port.try_next_item(req);
+      seq_item_port.get_next_item(req);
 
       if (req !is null) {
-
+        to_snooper.write(req);
+    
 	for (int i = 0; i != req.delay; ++i) {
 	  wait (avst_in.clock.negedge());
 
@@ -163,6 +169,7 @@ class avst_driver: uvm_driver!(avst_item)
 	wait (avst_in.clock.negedge());
 
 	avst_in.data = req.data;
+
 	avst_in.end = req.end;
 	avst_in.valid = true;
 
@@ -203,8 +210,8 @@ class avst_out_driver: uvm_component
       uint delay;
       uint flag;
       delay = urandom(0, 10);
-      flag = urandom(0, 10);
-      if (flag == 0) {
+      // flag = urandom(0, 10);
+      if (avst_out.valid == 0) {
 	for (size_t i=0; i!=delay; ++i) {
 	  avst_out.ready = false;
 	  wait (avst_out.clock.negedge());
@@ -227,6 +234,7 @@ class avst_snooper: uvm_monitor
   mixin uvm_component_utils;
 
   AvstIntf avst;
+    
 
   int _ready_latency = 0;
 
@@ -236,17 +244,32 @@ class avst_snooper: uvm_monitor
   }
 
   bool prev_ready;
+  bool done;
+
+  avst_item snooper_req; // Variable to store the received req object
+  @UVM_BUILD {
+    uvm_analysis_port!(avst_item) egress;
+    uvm_analysis_port!(avst_item) covport;
+    uvm_analysis_imp!(avst_snooper.write) driver_in;
+  }
+  
 
   this (string name, uvm_component parent = null) {
     super(name,parent);
     uvm_config_db!AvstIntf.get(this, "", "avst", avst);
     assert (avst !is null);
   }
-
-  @UVM_BUILD {
-    uvm_analysis_port!avst_item egress;
-  }
   
+  void write(avst_item req_from_driver)
+  {
+    // done = false;
+    snooper_req = req_from_driver;
+    writeln("delay worked inside! ", snooper_req.delay); // just checking if it works
+    // done = true;
+    // writeln("data worked! ", snooper_req.data);
+    covport.write(req_from_driver);
+  }
+
   override void run_phase(uvm_phase phase) {
     super.run_phase(phase);
 
@@ -259,17 +282,98 @@ class avst_snooper: uvm_monitor
 	continue;
       }
       else {
-	avst_item item = avst_item.type_id.create(get_full_name() ~ ".avst_item");
-	item.data = avst.data;
-	item.end = cast(bool) avst.end;
-	egress.write(item);
-	uvm_info("AVL Monitored Req", item.sprint(), UVM_DEBUG);
+        avst_item item = avst_item.type_id.create(get_full_name() ~ ".avst_item");
+	      item.data = avst.data;
+	      item.end = cast(bool) avst.end;
+        egress.write(item);
+
+        // if(done){
+        //   writeln("delay worked outside! ", snooper_req.delay);
+        //   item.data = avst.data;
+	      //   item.end = cast(bool) avst.end;
+        //   // item.delay = snooper_req.delay;
+        //   covport.write(item);
+        // }      
+        
+        uvm_info("AVL Monitored Req", item.sprint(), UVM_DEBUG);
+        
+	
 	// writeln("valid input");
       }
       if (_ready_latency == 1) prev_ready = avst.ready;
     }
   }
 
+}
+
+class avst_coverage: uvm_subscriber!(avst_item)
+{
+  // generates the factory blueprint for this class
+  mixin uvm_component_utils;
+
+  this(string name = "avst_coverage", uvm_component parent = null) {
+        super(name, parent);
+        init_coverage(get_type_name());
+    }
+
+  @UVM_BUILD {
+    //creates an input port called frm_monitor
+    uvm_analysis_imp!(avst_coverage.write) frm_monitor;
+  }
+
+  override void build_phase(uvm_phase phase) {
+    uvm_info(get_type_name(), ":: Entering build phase", UVM_DEBUG);
+  }
+
+  // function that is invoked when monitor tries to write to the coverage class
+  // void write_frm_monitor(avst_item a) {
+
+  //   //prints a message indicating data was received from monitor
+  //   uvm_info(get_type_name(), "Received in coverage class", UVM_DEBUG);
+
+  //   //signals to be sampled
+  //   test_cg.sample(
+  //     a.data,
+  //     a.delay,
+  //     a.end
+  //   );
+  // }
+
+  override void write(avst_item a) {
+    uvm_info("avst_coverage", "Received data in coverage class", UVM_DEBUG);
+
+    // Pass the coverage data to the sample function
+    test_cg.sample(a.delay, a.data, a.end);
+  }
+
+  override void report_phase(uvm_phase phase){
+    super.report_phase(phase);
+
+    uvm_report_server rs;
+    int error_count;
+    rs = uvm_report_server.get_server();
+    error_count = rs.get_severity_count(UVM_ERROR) + rs.get_severity_count(UVM_FATAL);
+
+    //print coverage
+    writeln(test_cg.get_coverage());
+    writeln(test_cg.get_cover_yaml_string());
+  }
+
+  // define the covergroups i.e. signals that are to be monitored and coverpoints:specific vals to be checked.
+  covergroup!q{
+    @sample ubyte delay;
+    @sample ubyte data;
+    @sample ubvec!1 end;
+
+
+    data_cp: coverpoint data {
+      bins[] data_bin = [0..255];
+    }
+
+    delay_cp: coverpoint delay {
+      bins[] delay_bin = [0..255];
+    }
+  }test_cg;
 }
 
 
@@ -313,25 +417,26 @@ class avst_scoreboard: uvm_scoreboard
       // seq.print();
       rsp_queue ~= seq;
       assert(phase_run !is null);
+      writeln("the data is here!", req_queue[$-1].phrase);
       check_matched();
       phase_run.drop_objection(this);
   }
 
   void check_matched() {
-    auto expected = req_queue[matched].transform();
+    auto expected = req_queue[matched].transform(); //an array from where values are streamed in
     // writeln("Ecpected: ", expected[0..64]);
     if (expected == rsp_queue[matched].phrase) {
       uvm_info("MATCHED",
 	       format("Scoreboard received expected response #%d", matched),
 	       UVM_LOW);
-      uvm_info("REQUEST", format("%s", req_queue[$-1].phrase), UVM_LOW);
-      uvm_info("RESPONSE", format("%s", rsp_queue[$-1].phrase), UVM_LOW);
     }
     else {
       uvm_error("MISMATCHED", "Scoreboard received unmatched response");
       writeln(expected, " != ", rsp_queue[matched].phrase);
     }
-    matched += 1;
+    uvm_info("REQUEST", format("%s", req_queue[$-1].phrase), UVM_LOW);
+    uvm_info("RESPONSE", format("%s", rsp_queue[$-1].phrase), UVM_LOW);
+    matched += 1; //incremented to get next
   }
 
 }
@@ -392,6 +497,8 @@ class avst_agent: uvm_agent
     avst_snooper   rsp_snooper;
 
     avst_scoreboard   scoreboard;
+
+    avst_coverage coverage;
   }
   
   mixin uvm_component_utils;
@@ -402,10 +509,14 @@ class avst_agent: uvm_agent
 
   override void connect_phase(uvm_phase phase) {
     driver.seq_item_port.connect(sequencer.seq_item_export);
+
     req_snooper.egress.connect(req_monitor.ingress);
     req_monitor.egress.connect(scoreboard.req_analysis);
+    
     rsp_snooper.egress.connect(rsp_monitor.ingress);
     rsp_monitor.egress.connect(scoreboard.rsp_analysis);
+    driver.to_snooper.connect(req_snooper.driver_in);
+    req_snooper.covport.connect(coverage.frm_monitor); // this is connecting snooper to coverage 
   }
 
   override void end_of_elaboration_phase(uvm_phase phase) {
@@ -430,7 +541,7 @@ class random_test: uvm_test
     phase.raise_objection(this);
     auto rand_sequence = new avst_seq("avst_seq");
 
-    for (size_t i=0; i!=100; ++i) {
+    for (size_t i=0; i!=200; ++i) {
       rand_sequence.randomize();
       auto sequence = cast(avst_seq) rand_sequence.clone();
       sequence.start(env.agent.sequencer, null);
@@ -551,7 +662,7 @@ class Top: Entity
   void stimulateClock() {
     import std.stdio;
     clock = false;
-    for (size_t i=0; i!=1000000; ++i)
+    for (size_t i=0; i!=100000000; ++i)
       {
 	
       // writeln("clock is: ", clock);
