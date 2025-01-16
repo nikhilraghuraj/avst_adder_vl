@@ -6,7 +6,8 @@ DFLAGS = -relocation-model=pic -w
 
 LDC2BINDIR = $(dir $(shell which ldc2))
 VLBINDIR = $(dir $(shell which verilator))
-VERBOSITY = LOW
+VERBOSITY = UVM_DEBUG
+
 
 VLATOR_SRC = euvm_dir/Vadder_avst_euvm.d euvm_dir/Vadder_avst_euvm_funcs.cpp obj_dir/Vadder_avst.cpp obj_dir/Vadder_avst.h
 
@@ -16,7 +17,9 @@ clean:
 	rm -rf avst_adder* euvm_dir obj_dir verilator.stamp
 
 run: avst_adder
-	./avst_adder +UVM_TESTNAME=adder_avst.random_test +UVM_VERBOSITY=$(VERBOSITY) +random_seed=$(SEED) # +UVM_OBJECTION_TRACE
+	{ echo "Simulation started at: $(shell date)"; \
+		./avst_adder +UVM_TESTNAME=adder_avst.random_test +UVM_VERBOSITY=$(VERBOSITY) +random_seed=$(SEED); \
+	} > simulation.log 2>&1 && code simulation.log
 
 verilator.stamp: ../rtl/adder_avst.v
 	touch verilator.stamp
