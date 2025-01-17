@@ -196,6 +196,8 @@ class avst_out_driver: uvm_component
   mixin uvm_component_utils;
   
   AvstIntf avst_out;
+  @UVM_BUILD
+    uvm_analysis_port!(uint) to_snooper;
 
   this(string name, uvm_component parent = null) {
     super(name, parent);
@@ -210,17 +212,22 @@ class avst_out_driver: uvm_component
       uint delay;
       uint flag;
       delay = urandom(0, 10);
+      to_snooper.write(delay);
       // flag = urandom(0, 10);
-      if (avst_out.valid == 0) {
-	for (size_t i=0; i!=delay; ++i) {
-	  avst_out.ready = false;
-	  wait (avst_out.clock.negedge());
-	}
-      }
-      else {
-	avst_out.ready = true;
-	wait (avst_out.clock.negedge());
-      }
+      // if(flag == 0){
+        if (avst_out.valid == 0) {
+          for (size_t i=0; i!=delay; ++i) {
+            avst_out.ready = false;
+            wait (avst_out.clock.negedge());
+          }
+        }
+        else {
+          // if(avst_out.valid == 0) {
+            avst_out.ready = true;
+            wait (avst_out.clock.negedge());
+          // }
+        }
+      // }
     }
   }
 
@@ -244,13 +251,13 @@ class avst_snooper: uvm_monitor
   }
 
   bool prev_ready;
-  bool done;
 
-  avst_item snooper_req; // Variable to store the received req object
   @UVM_BUILD {
     uvm_analysis_port!(avst_item) egress;
-    uvm_analysis_port!(avst_item) covport;
-    uvm_analysis_imp!(avst_snooper.write) driver_in;
+    uvm_analysis_port!(avst_item) req_covport;
+    uvm_analysis_port!(uint) rsp_covport;
+    uvm_analysis_imp!(avst_snooper.in_driver_delay) driver_in;
+    uvm_analysis_imp!(avst_snooper.out_driver_delay) out_driver_in;
   }
   
 
@@ -260,14 +267,15 @@ class avst_snooper: uvm_monitor
     assert (avst !is null);
   }
   
-  void write(avst_item req_from_driver)
+  void out_driver_delay(uint delay){
+    writeln("delay from the outdriver wavin from the snooper ", delay);
+    // rsp_covport.write(delay);
+
+  }
+  void in_driver_delay(avst_item req_from_driver)
   {
-    // done = false;
-    snooper_req = req_from_driver;
-    writeln("delay worked inside! ", snooper_req.delay); // just checking if it works
-    // done = true;
-    // writeln("data worked! ", snooper_req.data);
-    covport.write(req_from_driver);
+    writeln("delay from the indriver wavin from the snooper ", req_from_driver.delay); // just checking if it works
+    req_covport.write(req_from_driver);
   }
 
   override void run_phase(uvm_phase phase) {
@@ -338,7 +346,7 @@ class avst_coverage: uvm_subscriber!(avst_item)
   //     a.end
   //   );
   // }
-
+  
   override void write(avst_item a) {
     uvm_info("avst_coverage", "Received data in coverage class", UVM_DEBUG);
 
@@ -516,7 +524,8 @@ class avst_agent: uvm_agent
     rsp_snooper.egress.connect(rsp_monitor.ingress);
     rsp_monitor.egress.connect(scoreboard.rsp_analysis);
     driver.to_snooper.connect(req_snooper.driver_in);
-    req_snooper.covport.connect(coverage.frm_monitor); // this is connecting snooper to coverage 
+    req_snooper.req_covport.connect(coverage.frm_monitor); // this is connecting snooper to coverage 
+    driver_out.to_snooper.connect(rsp_snooper.out_driver_in);
   }
 
   override void end_of_elaboration_phase(uvm_phase phase) {
